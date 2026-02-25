@@ -19,12 +19,58 @@ const { authenticate } = require('./middleware/auth');
 const { adminOnly } = require('./middleware/adminAuth');
 
 const app = express();
-const corsOrigin = (process.env.CORS_ORIGIN || '*').replace(/\s+/g, '');
+
+function normalizeOrigin(origin) {
+    return String(origin || '').trim().replace(/\/+$/, '');
+}
+
+function expandOriginVariants(origin) {
+    const value = normalizeOrigin(origin);
+    if (!value) return [];
+
+    const variants = new Set([value]);
+
+    try {
+        const parsed = new URL(value);
+        const host = parsed.hostname;
+
+        if (host.startsWith('www.')) {
+            variants.add(`${parsed.protocol}//${host.slice(4)}`);
+        } else {
+            variants.add(`${parsed.protocol}//www.${host}`);
+        }
+    } catch {
+        // Ignore malformed origin entries.
+    }
+
+    return Array.from(variants);
+}
+
+const configuredOrigins = String(process.env.CORS_ORIGIN || '*')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+const allowedOrigins = new Set();
+configuredOrigins.forEach((origin) => {
+    expandOriginVariants(origin).forEach((entry) => allowedOrigins.add(entry));
+});
 
 app.use(helmet());
 
 app.use(cors({
-    origin: corsOrigin,
+    origin(origin, callback) {
+        // Allow server-to-server calls and tools with no Origin header.
+        if (!origin) return callback(null, true);
+
+        const normalized = normalizeOrigin(origin);
+
+        if (allowedOrigins.has('*') || allowedOrigins.has(normalized)) {
+            return callback(null, true);
+        }
+
+        return callback(new Error(`CORS blocked for origin: ${normalized}`));
+    },
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key'],
     credentials: true,
