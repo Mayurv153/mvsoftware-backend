@@ -1,7 +1,16 @@
+function normalizeEmail(email) {
+    return String(email || '')
+        .replace(/\\r|\\n/g, '')
+        .trim()
+        .replace(/^['"]+|['"]+$/g, '')
+        .toLowerCase();
+}
+
 function parseEmails(value) {
     return String(value || '')
+        .replace(/\\r|\\n/g, '')
         .split(',')
-        .map((email) => email.trim().toLowerCase())
+        .map(normalizeEmail)
         .filter(Boolean);
 }
 
@@ -20,7 +29,7 @@ function getPrimaryAdminEmail() {
 
 function isAdminEmail(email) {
     if (!email) return false;
-    return getAdminEmails().includes(String(email).trim().toLowerCase());
+    return getAdminEmails().includes(normalizeEmail(email));
 }
 
 module.exports = {
