@@ -6,10 +6,11 @@ const { getOrCreateTodayMetrics } = require('../../services/metricsService');
 const { getTasks } = require('../../services/taskService');
 const { sendEmail } = require('../../services/emailService');
 const logger = require('../../utils/logger');
-
-const ADMIN_EMAIL = (process.env.ADMIN_EMAILS || '').split(',')[0]?.trim();
+const { getPrimaryAdminEmail } = require('../../utils/adminEmails');
 
 function startDailyDigest() {
+    const ADMIN_EMAIL = getPrimaryAdminEmail();
+
     if (!ADMIN_EMAIL) {
         logger.warn('[Scheduler] No admin email — daily digest disabled');
         return;

@@ -3,11 +3,7 @@
 
 const { forbidden } = require('../utils/apiResponse');
 const logger = require('../utils/logger');
-
-const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || '')
-    .split(',')
-    .map((e) => e.trim().toLowerCase())
-    .filter(Boolean);
+const { isAdminEmail } = require('../utils/adminEmails');
 
 function adminOnly(req, res, next) {
     if (!req.user) {
@@ -16,7 +12,7 @@ function adminOnly(req, res, next) {
 
     const userEmail = (req.user.email || '').toLowerCase();
 
-    if (!ADMIN_EMAILS.includes(userEmail)) {
+    if (!isAdminEmail(userEmail)) {
         logger.warn('[AdminAuth] Unauthorized admin access attempt', {
             email: userEmail,
             ip: req.ip,

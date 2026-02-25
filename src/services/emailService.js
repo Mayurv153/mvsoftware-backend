@@ -3,9 +3,9 @@
 
 const { getResend } = require('../config/resend');
 const logger = require('../utils/logger');
+const { getPrimaryAdminEmail } = require('../utils/adminEmails');
 
 const EMAIL_FROM = process.env.EMAIL_FROM || 'onboarding@resend.dev';
-const ADMIN_EMAIL = (process.env.ADMIN_EMAILS || '').split(',')[0]?.trim();
 
 /**
  * Sends an email. Falls back to logging if Resend is not configured.
@@ -51,6 +51,8 @@ async function sendEmail({ to, subject, html, text }) {
  * Notifies admin about a new paid project.
  */
 async function notifyAdminNewProject({ clientEmail, clientName, planName, amount, projectId, deadline }) {
+  const ADMIN_EMAIL = getPrimaryAdminEmail();
+
   if (!ADMIN_EMAIL) {
     logger.warn('[Email] No admin email configured — skipping admin notification');
     return null;
@@ -134,6 +136,8 @@ async function notifyClientPaymentSuccess({ clientEmail, clientName, planName, a
  * Sends admin notification for new service request.
  */
 async function notifyAdminNewRequest({ name, email, phone, planSlug, message }) {
+  const ADMIN_EMAIL = getPrimaryAdminEmail();
+
   if (!ADMIN_EMAIL) return null;
 
   return sendEmail({
