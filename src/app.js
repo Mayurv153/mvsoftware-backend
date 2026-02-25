@@ -15,6 +15,8 @@ const serviceRequestRoutes = require('./routes/serviceRequests');
 const adminRoutes = require('./routes/admin');
 const agentRoutes = require('./routes/agent');
 const publicRoutes = require('./routes/public');
+const { authenticate } = require('./middleware/auth');
+const { adminOnly } = require('./middleware/adminAuth');
 
 const app = express();
 const corsOrigin = (process.env.CORS_ORIGIN || '*').replace(/\s+/g, '');
@@ -56,6 +58,15 @@ app.get('/api/health', (_req, res) => {
         uptime: process.uptime(),
         environment: process.env.NODE_ENV || 'development',
     });
+});
+
+/**
+ * GET /api/check-admin
+ * Quick check to verify if a user has admin privileges.
+ * Used by the frontend AdminGuard.
+ */
+app.get('/api/check-admin', authenticate, adminOnly, (_req, res) => {
+    res.json({ isAdmin: true });
 });
 
 app.use('/api/payments', paymentRoutes);
