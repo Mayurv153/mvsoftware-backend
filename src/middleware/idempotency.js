@@ -21,7 +21,7 @@ function idempotency(req, res, next) {
         .select('response, status_code')
         .eq('key', idempotencyKey)
         .eq('route', route)
-        .single()
+        .maybeSingle()
         .then(({ data, error }) => {
             if (data && !error) {
                 // Key exists — return cached response
