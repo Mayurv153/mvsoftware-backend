@@ -1,6 +1,6 @@
 function normalizeEmail(email) {
     return String(email || '')
-        .replace(/\\r|\\n/g, '')
+        .replace(/\r|\n/g, '')
         .trim()
         .replace(/^['"]+|['"]+$/g, '')
         .toLowerCase();
@@ -8,7 +8,7 @@ function normalizeEmail(email) {
 
 function parseEmails(value) {
     return String(value || '')
-        .replace(/\\r|\\n/g, '')
+        .replace(/\r|\n/g, '')
         .split(',')
         .map(normalizeEmail)
         .filter(Boolean);
