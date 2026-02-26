@@ -7,6 +7,7 @@ const {
     getAdminProjects,
     getAdminTasks,
     updateServiceRequest,
+    deleteServiceRequest,
     getPayments,
     getPlans,
     updatePlan,
