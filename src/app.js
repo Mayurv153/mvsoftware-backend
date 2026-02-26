@@ -75,7 +75,11 @@ const configuredOrigins = String(normalizeEnv(process.env.CORS_ORIGIN) || '*')
 
 const allowedOrigins = new Set();
 configuredOrigins.forEach((origin) => {
-    expandOriginVariants(origin).forEach((entry) => allowedOrigins.add(entry));
+    if (origin === '*') {
+        allowedOrigins.add('*');
+    } else {
+        expandOriginVariants(origin).forEach((entry) => allowedOrigins.add(entry));
+    }
 });
 
 app.use(helmet());
