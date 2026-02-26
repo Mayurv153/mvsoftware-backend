@@ -129,6 +129,25 @@ async function updateServiceRequest(req, res, next) {
 }
 
 /**
+ * DELETE /api/admin/requests/:id
+ * Deletes a service request.
+ */
+async function deleteServiceRequest(req, res, next) {
+    try {
+        const { id } = req.params;
+        const { error: dbError } = await supabaseAdmin
+            .from('service_requests')
+            .delete()
+            .eq('id', id);
+
+        if (dbError) throw new Error(`Failed to delete request: ${dbError.message}`);
+        return success(res, { message: 'Service request deleted' });
+    } catch (err) {
+        next(err);
+    }
+}
+
+/**
  * GET /api/admin/payments
  * Lists all payments with optional filters.
  */
@@ -704,6 +723,7 @@ module.exports = {
     getAdminProjects,
     getAdminTasks,
     updateServiceRequest,
+    deleteServiceRequest,
     getPayments,
     getPlans,
     updatePlan,

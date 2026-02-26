@@ -43,6 +43,7 @@ router.use(authenticate, adminOnly);
 // Service Requests
 router.get('/requests', getServiceRequests);
 router.patch('/requests/:id', updateServiceRequest);
+router.delete('/requests/:id', deleteServiceRequest);
 
 // Metrics
 router.get('/metrics', getDashboardMetrics);
