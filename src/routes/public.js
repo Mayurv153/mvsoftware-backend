@@ -329,3 +329,34 @@ router.get('/case-studies/:slug', async (req, res, next) => {
 });
 
 module.exports = router;
+
+/**
+ * GET /api/public/diagnostics/razorpay
+ * Safe diagnostic endpoint — returns presence of Razorpay config (no secrets).
+ */
+router.get('/diagnostics/razorpay', (req, res) => {
+    try {
+        // Require inside handler to avoid top-level cycles during startup
+        const {
+            isRazorpayConfigured,
+            getRazorpayKeyId,
+        } = require('../config/razorpay');
+
+        const configured = Boolean(isRazorpayConfigured());
+        const keyId = getRazorpayKeyId() || null;
+
+        const maskedKeyId = keyId
+            ? `${String(keyId).slice(0, 4)}...${String(keyId).slice(-4)}`
+            : null;
+
+        return success(res, {
+            razorpay_configured: configured,
+            razorpay_key_id_present: Boolean(keyId),
+            razorpay_key_id_masked: maskedKeyId,
+            webhook_secret_present: Boolean(process.env.RAZORPAY_WEBHOOK_SECRET),
+        });
+    } catch (err) {
+        logger.error('[Diagnostics] Failed to read Razorpay config', { error: err.message });
+        return res.status(500).json({ success: false, message: 'Diagnostics failed' });
+    }
+});

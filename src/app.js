@@ -24,29 +24,51 @@ function normalizeOrigin(origin) {
     return String(origin || '').trim().replace(/\/+$/, '');
 }
 
+function normalizeEnv(value) {
+    return String(value || '')
+        .replace(/\r|\n/g, '')
+        .trim()
+        .replace(/^['"]+|['"]+$/g, '');
+}
+
 function expandOriginVariants(origin) {
-    const value = normalizeOrigin(origin);
+    let value = normalizeOrigin(origin);
     if (!value) return [];
+
+    // If no protocol, default to https://
+    if (!/^https?:\/\//i.test(value)) {
+        value = `https://${value}`;
+    }
 
     const variants = new Set([value]);
 
     try {
         const parsed = new URL(value);
         const host = parsed.hostname;
+        const protocol = parsed.protocol;
 
+        // Add http/https variants
+        if (protocol === 'https:') {
+            variants.add(`http://${parsed.host}`);
+        } else if (protocol === 'http:') {
+            variants.add(`https://${parsed.host}`);
+        }
+
+        // Add www/non-www variants
         if (host.startsWith('www.')) {
-            variants.add(`${parsed.protocol}//${host.slice(4)}`);
+            variants.add(`${protocol}//${parsed.host.slice(4)}`);
         } else {
-            variants.add(`${parsed.protocol}//www.${host}`);
+            variants.add(`${protocol}//www.${parsed.host}`);
         }
     } catch {
-        // Ignore malformed origin entries.
+        // Fallback for non-URL origins (like *)
+        variants.add(value);
     }
 
     return Array.from(variants);
 }
 
-const configuredOrigins = String(process.env.CORS_ORIGIN || '*')
+const configuredOrigins = String(normalizeEnv(process.env.CORS_ORIGIN) || '*')
     .split(',')
     .map((item) => item.trim())
     .filter(Boolean);
@@ -69,7 +91,9 @@ app.use(cors({
             return callback(null, true);
         }
 
-        return callback(new Error(`CORS blocked for origin: ${normalized}`));
+        const corsError = new Error(`CORS blocked for origin: ${normalized}`);
+        corsError.status = 403;
+        return callback(corsError);
     },
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key'],

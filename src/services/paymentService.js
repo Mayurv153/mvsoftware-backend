@@ -1,11 +1,91 @@
-// ─── Payment Service ────────────────────────────────────────────
-// Handles Razorpay order creation, signature verification, and DB operations
+// Payment Service
+// Handles Razorpay order creation, signature verification, and DB operations.
 
 const crypto = require('crypto');
-const { getRazorpay, isRazorpayConfigured } = require('../config/razorpay');
+const {
+    getRazorpay,
+    isRazorpayConfigured,
+    getRazorpayKeyId,
+    getRazorpayKeySecret,
+} = require('../config/razorpay');
 const { supabaseAdmin } = require('../config/supabase');
 const { getPlan } = require('../config/plans');
 const logger = require('../utils/logger');
+
+function createHttpError(message, statusCode = 500, cause = null) {
+    const err = new Error(message);
+    err.statusCode = statusCode;
+    if (cause) {
+        err.cause = cause;
+    }
+    return err;
+}
+
+function isMissingRowError(error) {
+    if (!error) return false;
+    return (
+        error.code === 'PGRST116' ||
+        String(error.message || '').toLowerCase().includes('no rows')
+    );
+}
+
+function normalizeEnv(value) {
+    return String(value || '')
+        .replace(/\r|\n/g, '')
+        .trim()
+        .replace(/^['"]+|['"]+$/g, '');
+}
+
+async function ensurePlanRow(planSlug, plan) {
+    const { data: existingPlan, error: fetchError } = await supabaseAdmin
+        .from('plans')
+        .select('id')
+        .eq('slug', planSlug)
+        .maybeSingle();
+
+    if (fetchError) {
+        throw createHttpError('Failed to fetch plan from database', 503, fetchError);
+    }
+
+    if (existingPlan) {
+        return existingPlan;
+    }
+
+    const { data: insertedPlan, error: insertError } = await supabaseAdmin
+        .from('plans')
+        .insert({
+            name: plan.name,
+            slug: plan.slug,
+            price_inr: plan.priceInr,
+            display_price: plan.displayPrice,
+            features: plan.features,
+            delivery_days: plan.deliveryDays,
+            priority: plan.priority,
+            is_active: true,
+        })
+        .select('id')
+        .single();
+
+    if (!insertError && insertedPlan) {
+        logger.warn('[Payment] Missing plan row auto-created', { plan_slug: planSlug });
+        return insertedPlan;
+    }
+
+    // In concurrent requests, another request may insert the same plan.
+    if (insertError?.code === '23505') {
+        const { data: retriedPlan, error: retryError } = await supabaseAdmin
+            .from('plans')
+            .select('id')
+            .eq('slug', planSlug)
+            .maybeSingle();
+
+        if (!retryError && retriedPlan) {
+            return retriedPlan;
+        }
+    }
+
+    throw createHttpError('Failed to create missing plan row', 503, insertError);
+}
 
 /**
  * Creates a Razorpay order and saves it to the orders table.
@@ -13,28 +93,17 @@ const logger = require('../utils/logger');
 async function createOrder(userId, planSlug, idempotencyKey = null) {
     const plan = getPlan(planSlug);
     if (!plan) {
-        throw Object.assign(new Error(`Invalid plan: ${planSlug}`), { statusCode: 400 });
+        throw createHttpError(`Invalid plan: ${planSlug}`, 400);
     }
 
     if (plan.slug === 'custom') {
-        throw Object.assign(new Error('Custom plan requires a service request — contact us'), {
-            statusCode: 400,
-        });
+        throw createHttpError('Custom plan requires a service request - contact us', 400);
     }
 
-    // Get plan from DB to get the UUID
-    const { data: dbPlan, error: planError } = await supabaseAdmin
-        .from('plans')
-        .select('id')
-        .eq('slug', planSlug)
-        .single();
-
-    if (planError || !dbPlan) {
-        throw new Error(`Plan not found in database: ${planSlug}`);
-    }
+    const dbPlan = await ensurePlanRow(planSlug, plan);
 
     if (!isRazorpayConfigured()) {
-        // Razorpay not configured — return placeholder
+        // Razorpay not configured - return placeholder
         const { data: order, error: orderError } = await supabaseAdmin
             .from('orders')
             .insert({
@@ -51,7 +120,7 @@ async function createOrder(userId, planSlug, idempotencyKey = null) {
             .single();
 
         if (orderError) {
-            throw new Error(`Failed to save order: ${orderError.message}`);
+            throw createHttpError('Failed to save placeholder order', 503, orderError);
         }
 
         logger.info('[Payment] Placeholder order created (Razorpay not configured)', {
@@ -62,24 +131,41 @@ async function createOrder(userId, planSlug, idempotencyKey = null) {
             ...order,
             razorpay_configured: false,
             message: 'Razorpay not configured yet. Order saved as placeholder.',
-            plan: plan,
+            plan,
         };
     }
 
-    // Create Razorpay order
     const razorpay = getRazorpay();
-    const rzpOrder = await razorpay.orders.create({
-        amount: plan.priceInr,
-        currency: 'INR',
-        receipt: `mv_${Date.now()}`,
-        notes: {
+    let rzpOrder;
+
+    try {
+        rzpOrder = await razorpay.orders.create({
+            amount: plan.priceInr,
+            currency: 'INR',
+            receipt: `mv_${Date.now()}`,
+            notes: {
+                user_id: userId,
+                plan_slug: plan.slug,
+                plan_name: plan.name,
+            },
+        });
+    } catch (rzpError) {
+        logger.error('[Payment] Razorpay order creation failed', {
+            message: rzpError.message,
+            statusCode: rzpError.statusCode,
+            errorCode: rzpError.error?.code,
+            description: rzpError.error?.description,
             user_id: userId,
             plan_slug: plan.slug,
-            plan_name: plan.name,
-        },
-    });
+        });
 
-    // Save order to DB
+        throw createHttpError(
+            'Unable to create Razorpay order. Verify Razorpay live/test keys on backend.',
+            502,
+            rzpError
+        );
+    }
+
     const { data: order, error: orderError } = await supabaseAdmin
         .from('orders')
         .insert({
@@ -96,7 +182,10 @@ async function createOrder(userId, planSlug, idempotencyKey = null) {
         .single();
 
     if (orderError) {
-        throw new Error(`Failed to save order: ${orderError.message}`);
+        if (orderError.code === '23505' && String(orderError.message || '').includes('idempotency_key')) {
+            throw createHttpError('Duplicate payment order request', 409, orderError);
+        }
+        throw createHttpError('Failed to save order', 503, orderError);
     }
 
     logger.info('[Payment] Razorpay order created', {
@@ -108,8 +197,8 @@ async function createOrder(userId, planSlug, idempotencyKey = null) {
     return {
         ...order,
         razorpay_configured: true,
-        razorpay_key_id: process.env.RAZORPAY_KEY_ID,
-        plan: plan,
+        razorpay_key_id: getRazorpayKeyId(),
+        plan,
     };
 }
 
@@ -118,14 +207,17 @@ async function createOrder(userId, planSlug, idempotencyKey = null) {
  */
 function verifySignature(razorpayOrderId, razorpayPaymentId, razorpaySignature) {
     if (!isRazorpayConfigured()) {
-        throw Object.assign(new Error('Razorpay not configured — cannot verify signature'), {
-            statusCode: 503,
-        });
+        throw createHttpError('Razorpay not configured - cannot verify signature', 503);
     }
 
-    const body = razorpayOrderId + '|' + razorpayPaymentId;
+    const keySecret = getRazorpayKeySecret();
+    if (!keySecret) {
+        throw createHttpError('Razorpay secret is missing on backend', 503);
+    }
+
+    const body = `${razorpayOrderId}|${razorpayPaymentId}`;
     const expectedSignature = crypto
-        .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
+        .createHmac('sha256', keySecret)
         .update(body)
         .digest('hex');
 
@@ -144,32 +236,38 @@ async function recordPayment(paymentData) {
         method,
     } = paymentData;
 
-    // Get the order
     const { data: order, error: orderError } = await supabaseAdmin
         .from('orders')
         .select('*, plans(slug, name)')
         .eq('razorpay_order_id', razorpay_order_id)
         .single();
 
-    if (orderError || !order) {
-        throw Object.assign(new Error('Order not found'), { statusCode: 404 });
+    if (!order && !orderError) {
+        throw createHttpError('Order not found', 404);
     }
 
-    // Check for duplicate payment
-    const { data: existingPayment } = await supabaseAdmin
+    if (orderError) {
+        if (isMissingRowError(orderError)) {
+            throw createHttpError('Order not found', 404);
+        }
+        throw createHttpError('Failed to fetch order', 503, orderError);
+    }
+
+    const { data: existingPayment, error: existingPaymentError } = await supabaseAdmin
         .from('payments')
         .select('id')
         .eq('razorpay_payment_id', razorpay_payment_id)
-        .single();
+        .maybeSingle();
+
+    if (existingPaymentError && !isMissingRowError(existingPaymentError)) {
+        throw createHttpError('Failed to validate duplicate payment', 503, existingPaymentError);
+    }
 
     if (existingPayment) {
-        logger.warn('[Payment] Duplicate payment detected', {
-            razorpay_payment_id,
-        });
+        logger.warn('[Payment] Duplicate payment detected', { razorpay_payment_id });
         return { duplicate: true, order };
     }
 
-    // Save payment
     const { data: payment, error: paymentError } = await supabaseAdmin
         .from('payments')
         .insert({
@@ -188,14 +286,17 @@ async function recordPayment(paymentData) {
         .single();
 
     if (paymentError) {
-        throw new Error(`Failed to save payment: ${paymentError.message}`);
+        throw createHttpError('Failed to save payment', 503, paymentError);
     }
 
-    // Update order status
-    await supabaseAdmin
+    const { error: updateOrderError } = await supabaseAdmin
         .from('orders')
         .update({ status: 'paid' })
         .eq('id', order.id);
+
+    if (updateOrderError) {
+        throw createHttpError('Payment captured but failed to update order status', 503, updateOrderError);
+    }
 
     logger.info('[Payment] Payment verified and recorded', {
         paymentId: payment.id,
@@ -210,7 +311,7 @@ async function recordPayment(paymentData) {
  * Verifies Razorpay webhook signature.
  */
 function verifyWebhookSignature(body, signature) {
-    const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
+    const webhookSecret = normalizeEnv(process.env.RAZORPAY_WEBHOOK_SECRET);
     if (!webhookSecret) {
         throw new Error('RAZORPAY_WEBHOOK_SECRET not configured');
     }

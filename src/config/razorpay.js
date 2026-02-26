@@ -4,8 +4,15 @@
 const Razorpay = require('razorpay');
 const logger = require('../utils/logger');
 
-const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID;
-const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET;
+function normalizeEnv(value) {
+    return String(value || '')
+        .replace(/\r|\n/g, '')
+        .trim()
+        .replace(/^['"]+|['"]+$/g, '');
+}
+
+const RAZORPAY_KEY_ID = normalizeEnv(process.env.RAZORPAY_KEY_ID);
+const RAZORPAY_KEY_SECRET = normalizeEnv(process.env.RAZORPAY_KEY_SECRET);
 
 let razorpayInstance = null;
 
@@ -29,4 +36,17 @@ function isRazorpayConfigured() {
     return razorpayInstance !== null;
 }
 
-module.exports = { getRazorpay, isRazorpayConfigured };
+function getRazorpayKeyId() {
+    return RAZORPAY_KEY_ID;
+}
+
+function getRazorpayKeySecret() {
+    return RAZORPAY_KEY_SECRET;
+}
+
+module.exports = {
+    getRazorpay,
+    isRazorpayConfigured,
+    getRazorpayKeyId,
+    getRazorpayKeySecret,
+};

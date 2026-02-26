@@ -3,7 +3,15 @@
 const { Resend } = require('resend');
 const logger = require('../utils/logger');
 
-const RESEND_API_KEY = process.env.RESEND_API_KEY;
+function normalizeEnv(value) {
+    return String(value || '')
+        .replace(/\r|\n/g, '')
+        .trim()
+        .replace(/^['"]+|['"]+$/g, '');
+}
+
+const RESEND_API_KEY = normalizeEnv(process.env.RESEND_API_KEY);
+const EMAIL_FROM = normalizeEnv(process.env.EMAIL_FROM || 'noreply@mvsoftware.tech');
 
 let resendClient = null;
 

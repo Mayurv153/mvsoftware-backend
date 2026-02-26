@@ -3,12 +3,19 @@
 const mongoose = require('mongoose');
 const logger = require('../utils/logger');
 
+function normalizeEnv(value) {
+    return String(value || '')
+        .replace(/\r|\n/g, '')
+        .trim()
+        .replace(/^['"]+|['"]+$/g, '');
+}
+
 let isConnected = false;
 
 async function connectMongoDB() {
     if (isConnected) return;
 
-    const uri = process.env.MONGODB_URI;
+    const uri = normalizeEnv(process.env.MONGODB_URI);
     if (!uri) {
         logger.warn('[MongoDB] MONGODB_URI not set — agent logs will be skipped');
         return;
