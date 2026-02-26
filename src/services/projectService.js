@@ -56,7 +56,25 @@ async function createProject({ userId, planSlug, orderId, paymentId, userName })
         throw new Error(`Failed to create project: ${error.message}`);
     }
 
-    logger.info('[ProjectService] Project created', {
+    // ── Update User Profile Plan Badge ──────────────────
+    // This allows the frontend to show "Pro", "Starter", etc.
+    const { error: profileError } = await supabaseAdmin
+        .from('profiles')
+        .update({
+            plan_slug: plan.slug,
+            updated_at: new Date().toISOString(),
+        })
+        .eq('id', userId);
+
+    if (profileError) {
+        logger.warn('[ProjectService] Failed to update user profile plan badge', {
+            userId,
+            planSlug,
+            error: profileError.message,
+        });
+    }
+
+    logger.info('[ProjectService] Project created and profile plan updated', {
         projectId: project.id,
         planSlug,
         deadline: deadline.toISOString(),

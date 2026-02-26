@@ -121,6 +121,17 @@ CREATE TABLE IF NOT EXISTS idempotency_keys (
   expires_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '24 hours')
 );
 
+-- ── Profiles (Extended User Data) ───────────
+CREATE TABLE IF NOT EXISTS public.profiles (
+  id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  full_name TEXT,
+  avatar_url TEXT,
+  plan_slug TEXT DEFAULT 'free',
+  phone TEXT,
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- ============================================
 -- INDEXES
 -- ============================================
